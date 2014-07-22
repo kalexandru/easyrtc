@@ -1,18 +1,48 @@
-// Load required modules
-var http    = require("http");              // http server core module
-var express = require("express");           // web framework external module
-var io      = require("socket.io");         // web socket external module
-var easyrtc = require("easyrtc");           // EasyRTC external module
+var static = require('node-static');
+var http = require('http');
+var file = new(static.Server)();
+var app = http.createServer(function (req, res) {
+	file.serve(req, res);
+}).listen(1234);
 
-// Setup and configure Express http server. Expect a subfolder called "static" to be the web root.
-var httpApp = express();
-httpApp.use(express.static(__dirname + "/static/"));
+var io = require('socket.io').listen(app);
 
-// Start Express http server on port 8080
-var webServer = http.createServer(httpApp).listen(8080);
+io.sockets.on('connection', function (socket) {
+	function log() {
+		var array = [">>> "];
+		for(var i = 0; i < arguments.length; i++) {
+			array.push(arguments[i]);
+		}
+		socket.emit('log', array);
+	}
 
-// Start Socket.io so it attaches itself to Express server
-var socketServer = io.listen(webServer, {"log level":1});
+	socket.on('message', function (message) {
+		log('Got message: ', message);
+		socket.broadcast.emit('message', message); // should be room only
+	});
 
-// Start EasyRTC server
-var rtc = easyrtc.listen(httpApp, socketServer);
+	socket.on('create or join', function (room) {
+		var numClients = io.sockets.clients(room).length;
+
+		log('Room ' + room + ' has ' + numClients + ' client(s)');
+		log('Request to create or join room', room);
+
+		if(numClients == 0) {
+			socket.join(room);
+			socket.emit('created', room);
+		} 
+
+		else if(numClients == 1) {
+			io.sockets.in(room).emit('join', room);
+			socket.join(room);
+			socket.emit('joined', room);
+		} 
+
+		else { // max two clients
+			socket.emit('full', room);
+		}
+
+		socket.emit('emit(): client ' + socket.id + ' joined room ' + room);
+		socket.broadcast.emit('broadcast(): client ' + socket.id + ' joined room ' + room);
+	});
+});
